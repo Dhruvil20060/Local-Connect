@@ -223,10 +223,10 @@ const Home = () => {
           </div>
 
           <Link
-            to="/register?role=provider"
+            to="/register/provider"
             className="px-8 py-4 text-sm font-bold text-indigo-900 bg-white hover:bg-indigo-50 rounded-2xl transition-all shadow-md shrink-0"
           >
-            Register as Provider
+            Become a Provider
           </Link>
         </div>
       </section>

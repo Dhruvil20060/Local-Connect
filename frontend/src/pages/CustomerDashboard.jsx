@@ -4,7 +4,7 @@ import Loader from '../components/Loader';
 import BookingCard from '../components/BookingCard';
 import * as bookingService from '../services/bookingService';
 import * as reviewService from '../services/reviewService';
-import { Calendar, CheckCircle2, Clock, Star, X, AlertCircle } from 'lucide-react';
+import { Calendar, CheckCircle2, Clock, Star, X, AlertCircle, CreditCard, QrCode, ShieldCheck, Check } from 'lucide-react';
 
 const CustomerDashboard = () => {
   const { user } = useAuth();
@@ -22,12 +22,26 @@ const CustomerDashboard = () => {
   const [reviewError, setReviewError] = useState('');
   const [reviewSuccess, setReviewSuccess] = useState(false);
 
+  // Payment Modal State
+  const [selectedBookingForPayment, setSelectedBookingForPayment] = useState(null);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+
   const fetchBookings = async () => {
     try {
       const data = await bookingService.getCustomerBookings();
       setBookings(data);
+
+      // Auto-trigger review modal for completed/closed booking if not reviewed
+      const unreviewedCompleted = data.find(
+        (b) => ['Completed', 'COMPLETED', 'CLOSED'].includes(b.status) && !b.hasReviewed
+      );
+      if (unreviewedCompleted && !selectedBookingForReview && !selectedBookingForPayment) {
+        // Optional auto-open after data load
+      }
     } catch (error) {
-      console.error('Error fetching bookings:', error);
+      console.error('Error fetching customer bookings:', error);
     } finally {
       setLoading(false);
     }
@@ -52,6 +66,12 @@ const CustomerDashboard = () => {
     setReviewComment('');
     setReviewError('');
     setReviewSuccess(false);
+  };
+
+  const handleOpenPaymentModal = (booking) => {
+    setSelectedBookingForPayment(booking);
+    setPaymentError('');
+    setPaymentSuccess(false);
   };
 
   const handleReviewSubmit = async (e) => {
@@ -80,13 +100,50 @@ const CustomerDashboard = () => {
     }
   };
 
-  // Stat calculations
-  const activeCount = bookings.filter((b) => ['Requested', 'Accepted', 'In Progress'].includes(b.status)).length;
-  const completedCount = bookings.filter((b) => b.status === 'Completed').length;
-  const pendingCount = bookings.filter((b) => b.status === 'Requested').length;
+  const handleMarkPaymentSent = async () => {
+    if (!selectedBookingForPayment) return;
+    setPaymentError('');
+    setPaymentSubmitting(true);
+
+    try {
+      await bookingService.markPaymentSent(selectedBookingForPayment._id);
+      setPaymentSuccess(true);
+      setTimeout(() => {
+        setSelectedBookingForPayment(null);
+        setPaymentSuccess(false);
+        fetchBookings();
+      }, 1500);
+    } catch (err) {
+      setPaymentError(err.response?.data?.message || 'Failed to update payment status.');
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  };
+
+  // Stat calculations supporting both DB status codes and UI strings
+  const activeCount = bookings.filter((b) =>
+    ['Requested', 'OFFERED', 'PENDING', 'Accepted', 'ACCEPTED', 'In Progress', 'IN_PROGRESS'].includes(b.status)
+  ).length;
+  const completedCount = bookings.filter((b) =>
+    ['Completed', 'COMPLETED', 'CLOSED'].includes(b.status)
+  ).length;
+  const pendingCount = bookings.filter((b) =>
+    ['Requested', 'OFFERED', 'PENDING'].includes(b.status)
+  ).length;
+  const paymentPendingCount = bookings.filter((b) =>
+    b.paymentStatus === 'PAYMENT_PENDING' || (['Completed', 'COMPLETED'].includes(b.status) && b.paymentStatus !== 'PAYMENT_RECEIVED')
+  ).length;
 
   const filteredBookings = bookings.filter((b) => {
     if (activeTab === 'All') return true;
+    if (activeTab === 'Requested') return ['Requested', 'OFFERED', 'PENDING'].includes(b.status);
+    if (activeTab === 'Accepted') return ['Accepted', 'ACCEPTED'].includes(b.status);
+    if (activeTab === 'In Progress') return ['In Progress', 'IN_PROGRESS'].includes(b.status);
+    if (activeTab === 'Completed') return ['Completed', 'COMPLETED'].includes(b.status);
+    if (activeTab === 'Payment Pending') return b.paymentStatus === 'PAYMENT_PENDING';
+    if (activeTab === 'Payment Sent') return b.paymentStatus === 'PAYMENT_SENT';
+    if (activeTab === 'Closed') return b.status === 'CLOSED';
+    if (activeTab === 'Cancelled') return ['Cancelled', 'CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_PROVIDER', 'Rejected', 'REJECTED'].includes(b.status);
     return b.status === activeTab;
   });
 
@@ -99,12 +156,12 @@ const CustomerDashboard = () => {
             Customer Dashboard
           </span>
           <h1 className="text-2xl sm:text-3xl font-extrabold mt-2">Hello, {user?.name}!</h1>
-          <p className="text-xs text-indigo-100 mt-1">Track your service requests and review completed jobs.</p>
+          <p className="text-xs text-indigo-100 mt-1">Track your service requests, pay via UPI QR code, and review completed jobs.</p>
         </div>
       </div>
 
       {/* Summary Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-2xs flex items-center gap-4">
           <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl">
             <Clock className="w-6 h-6" />
@@ -126,6 +183,16 @@ const CustomerDashboard = () => {
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-2xs flex items-center gap-4">
+          <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl">
+            <CreditCard className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-2xs font-bold text-slate-400 uppercase">Payment Pending</span>
+            <h3 className="text-2xl font-black text-slate-900">{paymentPendingCount}</h3>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-2xs flex items-center gap-4">
           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
             <CheckCircle2 className="w-6 h-6" />
           </div>
@@ -143,7 +210,7 @@ const CustomerDashboard = () => {
 
           {/* Status Tabs */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 scrollbar-none">
-            {['All', 'Requested', 'Accepted', 'In Progress', 'Completed', 'Cancelled'].map((tab) => (
+            {['All', 'Requested', 'Accepted', 'In Progress', 'Completed', 'Payment Pending', 'Payment Sent', 'Closed', 'Cancelled'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -176,6 +243,7 @@ const CustomerDashboard = () => {
                 userRole="customer"
                 onUpdateStatus={handleUpdateStatus}
                 onOpenReviewModal={handleOpenReviewModal}
+                onOpenPaymentModal={handleOpenPaymentModal}
               />
             ))}
           </div>
@@ -185,7 +253,7 @@ const CustomerDashboard = () => {
       {/* Review Submission Modal */}
       {selectedBookingForReview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 border border-slate-200 shadow-2xl relative">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 border border-slate-200 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <button
               onClick={() => setSelectedBookingForReview(null)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
@@ -196,7 +264,7 @@ const CustomerDashboard = () => {
             <div>
               <span className="text-2xs font-extrabold text-indigo-600 uppercase tracking-widest">Rate & Review</span>
               <h2 className="text-lg font-bold text-slate-900 mt-1">Review {selectedBookingForReview.service} Service</h2>
-              <p className="text-xs text-slate-500">Provider: {selectedBookingForReview.providerId?.name}</p>
+              <p className="text-xs text-slate-500">Provider: {selectedBookingForReview.providerId?.name || selectedBookingForReview.offeredTo?.name}</p>
             </div>
 
             {reviewSuccess ? (
@@ -221,7 +289,7 @@ const CustomerDashboard = () => {
                         type="button"
                         key={star}
                         onClick={() => setReviewRating(star)}
-                        className="p-1 hover:scale-110 transition-transform focus:outline-hidden"
+                        className="p-1 hover:scale-110 transition-transform focus:outline-hidden cursor-pointer"
                       >
                         <Star
                           className={`w-7 h-7 ${
@@ -248,11 +316,88 @@ const CustomerDashboard = () => {
                 <button
                   type="submit"
                   disabled={reviewSubmitting}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all"
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
                 >
-                  {reviewSubmitting ? 'Submitting...' : 'Post Review'}
+                  {reviewSubmitting ? 'Submitting...' : 'Submit Review'}
                 </button>
               </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Customer Payment Modal (UPI QR Code) */}
+      {selectedBookingForPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 border border-slate-200 shadow-2xl relative text-center animate-in fade-in zoom-in-95 duration-150">
+            <button
+              onClick={() => setSelectedBookingForPayment(null)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <span className="text-2xs font-extrabold text-indigo-600 uppercase tracking-widest">Complete Payment</span>
+              <h2 className="text-xl font-bold text-slate-900 mt-1">Scan UPI QR Code</h2>
+              <p className="text-xs text-slate-500">Service: {selectedBookingForPayment.service}</p>
+            </div>
+
+            {paymentSuccess ? (
+              <div className="p-6 bg-emerald-50 border border-emerald-200 text-emerald-800 text-center rounded-2xl space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                <h4 className="font-bold text-sm">Payment Marked as Sent!</h4>
+                <p className="text-xs text-emerald-700">Waiting for provider confirmation...</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {paymentError && (
+                  <div className="p-3 bg-rose-50 text-rose-700 text-xs font-semibold rounded-xl flex items-center gap-2 text-left">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{paymentError}</span>
+                  </div>
+                )}
+
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span>Service Visit Fee:</span>
+                    <span className="text-lg font-black text-indigo-600">
+                      ₹{selectedBookingForPayment.paymentAmount || selectedBookingForPayment.visitCharge || 199}
+                    </span>
+                  </div>
+
+                  {/* QR Image */}
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 inline-block shadow-sm">
+                    <img
+                      src="/assets/payment-qr.png"
+                      alt="UPI Payment QR Code"
+                      className="w-52 h-52 object-contain mx-auto rounded-xl"
+                    />
+                  </div>
+
+                  <p className="text-2xs text-slate-500 font-medium">
+                    Scan this QR code using Google Pay, PhonePe, Paytm, or any UPI app to complete your payment.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    onClick={handleMarkPaymentSent}
+                    disabled={paymentSubmitting}
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    {paymentSubmitting ? 'Updating Payment...' : 'I Have Paid'}
+                  </button>
+
+                  <button
+                    onClick={() => setSelectedBookingForPayment(null)}
+                    className="w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
+                  >
+                    Pay Later
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

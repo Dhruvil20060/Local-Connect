@@ -1,70 +1,67 @@
-import { getStorageData, updateStorage } from './mockData';
+import API from './api';
 
+// Create a new booking request via Backend API
 export const createBooking = async (bookingData) => {
-  const saved = localStorage.getItem('userInfo');
-  if (!saved) throw { response: { data: { message: 'Not authenticated' } } };
-  const user = JSON.parse(saved);
-
-  const data = getStorageData();
-  
-  // Find provider
-  const provider = data.providers.find(p => p._id === bookingData.providerId);
-  if (!provider) throw { response: { data: { message: 'Provider not found' } } };
-
-  const newBooking = {
-    _id: `b${Date.now()}`,
-    customerId: {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone || ''
-    },
-    providerId: {
-      _id: provider.userId._id,
-      name: provider.userId.name,
-      email: provider.userId.email,
-      phone: provider.userId.phone || ''
-    },
-    service: provider.profession,
-    problemDescription: bookingData.problemDescription,
-    address: bookingData.address,
-    preferredDate: bookingData.preferredDate,
-    preferredTime: bookingData.preferredTime,
-    status: 'Requested',
-    createdAt: new Date().toISOString()
-  };
-
-  data.bookings.unshift(newBooking);
-  updateStorage('bookings', data.bookings);
-
-  return newBooking;
+  const response = await API.post('/bookings', bookingData);
+  return response.data;
 };
 
+// Fetch customer's bookings from Backend API
 export const getCustomerBookings = async () => {
-  const saved = localStorage.getItem('userInfo');
-  if (!saved) throw { response: { data: { message: 'Not authenticated' } } };
-  const user = JSON.parse(saved);
-
-  const data = getStorageData();
-  return data.bookings.filter(b => b.customerId._id === user._id);
+  const response = await API.get('/bookings/my');
+  return response.data;
 };
 
+// Fetch provider's requests and assigned jobs from Backend API
 export const getProviderBookings = async () => {
-  const saved = localStorage.getItem('userInfo');
-  if (!saved) throw { response: { data: { message: 'Not authenticated' } } };
-  const user = JSON.parse(saved);
-
-  const data = getStorageData();
-  return data.bookings.filter(b => b.providerId._id === user._id);
+  const response = await API.get('/bookings/provider');
+  return response.data;
 };
 
+// Update booking status via Backend API
 export const updateBookingStatus = async (bookingId, status) => {
-  const data = getStorageData();
-  const index = data.bookings.findIndex(b => b._id === bookingId);
-  if (index === -1) throw { response: { data: { message: 'Booking not found' } } };
+  const response = await API.patch(`/bookings/${bookingId}/status`, { status });
+  return response.data;
+};
 
-  data.bookings[index].status = status;
-  updateStorage('bookings', data.bookings);
+// Explicit Accept booking action
+export const acceptBooking = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/accept`);
+  return response.data;
+};
 
-  return data.bookings[index];
+// Explicit Reject booking action
+export const rejectBooking = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/reject`);
+  return response.data;
+};
+
+// Explicit Start booking action (In Progress)
+export const startBooking = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/start`);
+  return response.data;
+};
+
+// Explicit Complete booking action
+export const completeBooking = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/complete`);
+  return response.data;
+};
+
+// Customer marks payment as sent after scanning QR code
+export const markPaymentSent = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/pay-sent`);
+  return response.data;
+};
+
+// Provider confirms payment received & closes booking
+export const confirmPaymentReceived = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/confirm-payment`);
+  return response.data;
+};
+
+// Cancel booking action (Customer)
+export const cancelBooking = async (bookingId) => {
+  const response = await API.patch(`/bookings/${bookingId}/cancel`);
+  return response.data;
 };

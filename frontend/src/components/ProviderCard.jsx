@@ -39,7 +39,7 @@ const ProviderCard = ({ provider }) => {
         <div className="flex items-start gap-4 mb-4">
           <div className="relative shrink-0">
             <img
-              src={profileImage || 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?w=400'}
+              src={profileImage && profileImage.trim() !== '' ? profileImage : `https://ui-avatars.com/api/?name=${encodeURIComponent(providerName)}&background=6366f1&color=fff`}
               alt={providerName}
               className="w-16 h-16 rounded-2xl object-cover border border-slate-200 shadow-xs group-hover:scale-105 transition-transform"
             />
@@ -63,8 +63,8 @@ const ProviderCard = ({ provider }) => {
 
             <div className="flex items-center gap-1 mt-2">
               <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
-              <span className="text-xs font-bold text-slate-800">{averageRating > 0 ? averageRating : 'New'}</span>
-              <span className="text-xs text-slate-400">({totalReviews} reviews)</span>
+              <span className="text-xs font-bold text-slate-800">{totalReviews > 0 ? averageRating : 'New'}</span>
+              <span className="text-xs text-slate-400">({totalReviews} {totalReviews === 1 ? 'review' : 'reviews'})</span>
             </div>
           </div>
         </div>

@@ -45,6 +45,20 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
+  const registerProviderUser = async (providerData) => {
+    const data = await authService.registerProvider(providerData);
+    setUser(data);
+    localStorage.setItem('userInfo', JSON.stringify(data));
+    return data;
+  };
+
+  const becomeProviderUser = async (providerData) => {
+    const data = await authService.becomeProvider(providerData);
+    setUser(data);
+    localStorage.setItem('userInfo', JSON.stringify(data));
+    return data;
+  };
+
   const logout = () => {
     setUser(null);
     localStorage.removeItem('userInfo');
@@ -65,6 +79,8 @@ export const AuthProvider = ({ children }) => {
         loading,
         login: loginUser,
         register: registerUser,
+        registerProvider: registerProviderUser,
+        becomeProvider: becomeProviderUser,
         logout,
         updateUser
       }}

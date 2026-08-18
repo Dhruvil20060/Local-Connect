@@ -1,87 +1,48 @@
-import { getStorageData, updateStorage } from './mockData';
+import API from './api';
 
+// Fetch categories from Backend API
 export const getServices = async () => {
-  const data = getStorageData();
-  return data.categories;
+  const response = await API.get('/providers/categories');
+  return response.data;
 };
 
+// Fetch providers from Backend API with query params
 export const getProviders = async (filters = {}) => {
-  const data = getStorageData();
-  let result = [...data.providers];
+  const params = new URLSearchParams();
+  if (filters.search) params.append('search', filters.search);
+  if (filters.service && filters.service !== 'All') params.append('service', filters.service);
+  if (filters.category && filters.category !== 'All') params.append('service', filters.category);
+  if (filters.city) params.append('city', filters.city);
+  if (filters.location) params.append('city', filters.location);
+  if (filters.rating) params.append('rating', filters.rating);
+  if (filters.sortBy) params.append('sortBy', filters.sortBy);
 
-  if (filters.category) {
-    result = result.filter(p => p.profession.toLowerCase() === filters.category.toLowerCase());
-  }
-  if (filters.city) {
-    result = result.filter(p => p.city.toLowerCase() === filters.city.toLowerCase());
-  }
-  if (filters.search) {
-    const q = filters.search.toLowerCase();
-    result = result.filter(p => 
-      p.userId.name.toLowerCase().includes(q) || 
-      p.profession.toLowerCase().includes(q) ||
-      p.description.toLowerCase().includes(q)
-    );
-  }
-
-  return result;
+  const response = await API.get(`/providers?${params.toString()}`);
+  return response.data;
 };
 
+// Fetch single provider details by ID from Backend API
 export const getProviderById = async (id) => {
-  const data = getStorageData();
-  const provider = data.providers.find(p => p._id === id || p.userId._id === id);
-  if (!provider) {
-    throw { response: { data: { message: 'Provider not found' } } };
-  }
-  return provider;
+  const response = await API.get(`/providers/${id}`);
+  return response.data;
 };
 
+// Fetch logged-in provider profile from Backend API
 export const getMyProviderProfile = async () => {
-  const saved = localStorage.getItem('userInfo');
-  if (!saved) throw { response: { data: { message: 'Not authenticated' } } };
-  const user = JSON.parse(saved);
-
-  const data = getStorageData();
-  const provider = data.providers.find(p => p.userId._id === user._id);
-  if (!provider) {
-    throw { response: { data: { message: 'Provider profile not found' } } };
-  }
-  return provider;
+  const response = await API.get('/providers/profile/me');
+  return response.data;
 };
 
+// Update provider profile details via Backend API
 export const updateProviderProfile = async (profileData) => {
-  const saved = localStorage.getItem('userInfo');
-  if (!saved) throw { response: { data: { message: 'Not authenticated' } } };
-  const user = JSON.parse(saved);
-
-  const data = getStorageData();
-  const index = data.providers.findIndex(p => p.userId._id === user._id);
-  if (index === -1) {
-    throw { response: { data: { message: 'Provider profile not found' } } };
-  }
-
-  data.providers[index] = {
-    ...data.providers[index],
-    ...profileData
-  };
-  updateStorage('providers', data.providers);
-
-  return data.providers[index];
+  const response = await API.put('/providers/profile', profileData);
+  return response.data;
 };
 
+export const updateProfile = updateProviderProfile;
+
+// Update provider availability status via Backend API
 export const updateAvailability = async (availability) => {
-  const saved = localStorage.getItem('userInfo');
-  if (!saved) throw { response: { data: { message: 'Not authenticated' } } };
-  const user = JSON.parse(saved);
-
-  const data = getStorageData();
-  const index = data.providers.findIndex(p => p.userId._id === user._id);
-  if (index === -1) {
-    throw { response: { data: { message: 'Provider profile not found' } } };
-  }
-
-  data.providers[index].availability = availability;
-  updateStorage('providers', data.providers);
-
-  return data.providers[index];
+  const response = await API.patch('/providers/availability', { availability });
+  return response.data;
 };

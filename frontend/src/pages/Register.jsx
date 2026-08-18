@@ -1,29 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Wrench, User, Mail, Phone, Lock, Briefcase, MapPin, IndianRupee, AlertCircle, ArrowRight } from 'lucide-react';
+import { Wrench, User, Mail, Phone, Lock, AlertCircle, ArrowRight } from 'lucide-react';
 
 const Register = () => {
   const { register } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
 
-  const queryParams = new URLSearchParams(location.search);
-  const initialRole = queryParams.get('role') === 'provider' ? 'provider' : 'customer';
-
-  const [role, setRole] = useState(initialRole);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
     password: '',
-    confirmPassword: '',
-    profession: 'Plumber',
-    city: 'Surat',
-    experience: 2,
-    visitCharge: 199,
-    serviceArea: 'City Wide',
-    description: ''
+    confirmPassword: ''
   });
 
   const [error, setError] = useState('');
@@ -36,6 +25,11 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    if (!formData.name || !formData.email || !formData.phone || !formData.password) {
+      setError('Please fill in all required fields');
+      return;
+    }
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -55,21 +49,11 @@ const Register = () => {
         email: formData.email,
         phone: formData.phone,
         password: formData.password,
-        role: role
+        confirmPassword: formData.confirmPassword
       };
 
-      if (role === 'provider') {
-        payload.profession = formData.profession;
-        payload.city = formData.city;
-        payload.experience = Number(formData.experience);
-        payload.visitCharge = Number(formData.visitCharge);
-        payload.serviceArea = formData.serviceArea;
-        payload.description = formData.description;
-      }
-
-      const res = await register(payload);
-      if (res.role === 'provider') navigate('/provider/dashboard');
-      else navigate('/customer/dashboard');
+      await register(payload);
+      navigate('/customer/dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed. Try again.');
     } finally {
@@ -85,29 +69,7 @@ const Register = () => {
             <Wrench className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-extrabold text-slate-900">Create Account</h2>
-          <p className="text-xs text-slate-500">Join LocalConnect to request or provide services</p>
-        </div>
-
-        {/* Role Toggle Tabs */}
-        <div className="flex bg-slate-100 p-1.5 rounded-2xl">
-          <button
-            type="button"
-            onClick={() => setRole('customer')}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-              role === 'customer' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            I am a Customer
-          </button>
-          <button
-            type="button"
-            onClick={() => setRole('provider')}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-              role === 'provider' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            I am a Service Provider
-          </button>
+          <p className="text-xs text-slate-500">Join LocalConnect to request or manage services</p>
         </div>
 
         {error && (
@@ -202,94 +164,12 @@ const Register = () => {
             </div>
           </div>
 
-          {/* Provider Specific Fields */}
-          {role === 'provider' && (
-            <div className="pt-2 border-t border-slate-100 space-y-4">
-              <span className="text-xs font-extrabold text-indigo-600 uppercase tracking-wider block">
-                Professional Details
-              </span>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Profession</label>
-                  <select
-                    name="profession"
-                    value={formData.profession}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden"
-                  >
-                    <option value="Plumber">Plumber</option>
-                    <option value="Electrician">Electrician</option>
-                    <option value="AC Repair">AC Repair</option>
-                    <option value="Carpenter">Carpenter</option>
-                    <option value="Appliance Repair">Appliance Repair</option>
-                    <option value="Home Cleaning">Home Cleaning</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">City</label>
-                  <input
-                    type="text"
-                    name="city"
-                    required
-                    value={formData.city}
-                    onChange={handleChange}
-                    placeholder="Surat"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Experience (Years)</label>
-                  <input
-                    type="number"
-                    name="experience"
-                    min="0"
-                    required
-                    value={formData.experience}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Visit Charge (₹)</label>
-                  <input
-                    type="number"
-                    name="visitCharge"
-                    min="0"
-                    required
-                    value={formData.visitCharge}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Service Area / Sub-locations</label>
-                <input
-                  type="text"
-                  name="serviceArea"
-                  required
-                  value={formData.serviceArea}
-                  onChange={handleChange}
-                  placeholder="e.g. Adajan, Pal, Vesu"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden"
-                />
-              </div>
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 mt-4"
+            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 mt-4 cursor-pointer"
           >
-            {submitting ? 'Creating Account...' : `Register as ${role === 'provider' ? 'Provider' : 'Customer'}`}
+            {submitting ? 'Creating Account...' : 'Register'}
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

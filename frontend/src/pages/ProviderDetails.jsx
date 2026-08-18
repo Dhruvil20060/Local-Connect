@@ -53,6 +53,29 @@ const ProviderDetails = () => {
     }
 
     setBookingError('');
+
+    // Date & Time Validation Rule
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    if (bookingForm.preferredDate < todayStr) {
+      setBookingError('Preferred booking date cannot be in the past.');
+      return;
+    }
+
+    if (bookingForm.preferredDate === todayStr) {
+      const currentHour = today.getHours();
+      let slotEndHour = 24;
+      if (bookingForm.preferredTime.includes('09:00 AM')) slotEndHour = 11;
+      else if (bookingForm.preferredTime.includes('11:00 AM')) slotEndHour = 13;
+      else if (bookingForm.preferredTime.includes('02:00 PM')) slotEndHour = 16;
+      else if (bookingForm.preferredTime.includes('04:00 PM')) slotEndHour = 18;
+
+      if (currentHour >= slotEndHour) {
+        setBookingError('The selected time slot has already passed for today. Please select a future time slot.');
+        return;
+      }
+    }
+
     setBookingSubmitting(true);
 
     try {
@@ -119,7 +142,7 @@ const ProviderDetails = () => {
         <div className="flex flex-col sm:flex-row items-start gap-6">
           <div className="relative">
             <img
-              src={profileImage || 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?w=400'}
+              src={profileImage && profileImage.trim() !== '' ? profileImage : `https://ui-avatars.com/api/?name=${encodeURIComponent(providerName)}&background=6366f1&color=fff`}
               alt={providerName}
               className="w-28 h-28 rounded-2xl object-cover border-2 border-slate-100 shadow-sm"
             />
@@ -146,9 +169,9 @@ const ProviderDetails = () => {
             <div className="flex items-center gap-2 pt-1">
               <div className="flex items-center gap-1 bg-amber-50 text-amber-800 px-2.5 py-1 rounded-lg border border-amber-200 text-xs font-bold">
                 <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-                <span>{averageRating > 0 ? averageRating : 'New'}</span>
+                <span>{totalReviews > 0 ? averageRating : 'New'}</span>
               </div>
-              <span className="text-xs text-slate-500">Based on {totalReviews} customer reviews</span>
+              <span className="text-xs text-slate-500">Based on {totalReviews} customer {totalReviews === 1 ? 'review' : 'reviews'}</span>
             </div>
 
             {/* Availability */}

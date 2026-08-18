@@ -7,6 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ProviderRegister from './pages/ProviderRegister';
 import Providers from './pages/Providers';
 import ProviderDetails from './pages/ProviderDetails';
 import CustomerDashboard from './pages/CustomerDashboard';
@@ -23,6 +24,8 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/register/provider" element={<ProviderRegister />} />
+        <Route path="/become-provider" element={<ProviderRegister />} />
         <Route path="/providers" element={<Providers />} />
         <Route path="/providers/:id" element={<ProviderDetails />} />
 
