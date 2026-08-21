@@ -18,6 +18,14 @@ export const getProviderBookings = async () => {
   return response.data;
 };
 
+// Fetch database-driven provider availability slots & ETAs
+export const getProviderAvailability = async ({ providerId, preferredDate, address }) => {
+  const response = await API.get('/bookings/availability', {
+    params: { providerId, preferredDate, address }
+  });
+  return response.data;
+};
+
 // Update booking status via Backend API
 export const updateBookingStatus = async (bookingId, status) => {
   const response = await API.patch(`/bookings/${bookingId}/status`, { status });

@@ -4,34 +4,224 @@ const User = require('../models/User');
 
 const OFFER_TIMEOUT_SECONDS = parseInt(process.env.BOOKING_OFFER_TIMEOUT) || 60;
 
+const getSlotHours = (preferredTime) => {
+  if (!preferredTime) return { startHour: null, endHour: null };
+  const matches = preferredTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/gi);
+  if (!matches || matches.length < 1) return { startHour: null, endHour: null };
+
+  const parseSingleTime = (timeStr) => {
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!match) return null;
+    let hour = parseInt(match[1], 10);
+    const period = match[3].toUpperCase();
+    if (period === 'PM' && hour < 12) hour += 12;
+    if (period === 'AM' && hour === 12) hour = 0;
+    return hour;
+  };
+
+  const startHour = parseSingleTime(matches[0]);
+  let endHour = matches.length >= 2 ? parseSingleTime(matches[1]) : (startHour !== null ? startHour + 1 : null);
+  if (endHour === 0 && startHour === 23) endHour = 24;
+
+  return { startHour, endHour };
+};
+
+const getSlotStartHour = (preferredTime) => {
+  return getSlotHours(preferredTime).startHour;
+};
+
 // Helper to check date/time slot validity
 const validateBookingDateTime = (preferredDate, preferredTime) => {
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
 
   // 1. Date cannot be before today
   if (preferredDate < todayStr) {
     return { valid: false, message: 'Preferred date cannot be in the past' };
   }
 
-  // 2. If date is today, check if preferred time slot is already past
+  // 2. If date is today, check if preferred time slot has completely ended
   if (preferredDate === todayStr && preferredTime) {
     const currentHour = today.getHours();
-    const currentMinutes = today.getMinutes();
+    const { endHour } = getSlotHours(preferredTime);
 
-    // Map common slot strings to their start/end hour in 24h format
-    let slotEndHour = 24;
-    if (preferredTime.includes('09:00 AM')) slotEndHour = 11;
-    else if (preferredTime.includes('11:00 AM')) slotEndHour = 13;
-    else if (preferredTime.includes('02:00 PM')) slotEndHour = 16;
-    else if (preferredTime.includes('04:00 PM')) slotEndHour = 18;
-
-    if (currentHour >= slotEndHour) {
+    // Slot is only past if it has completely ended (endHour <= currentHour)
+    if (endHour !== null && endHour <= currentHour) {
       return { valid: false, message: 'The selected time slot has already passed for today. Please select a future time slot.' };
     }
   }
 
   return { valid: true };
+};
+
+// Calculate database-driven slot availability and travel ETAs for a provider
+const calculateProviderSlotAvailability = async (providerId, preferredDate, customerAddress = '') => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+  const currentHour = today.getHours();
+  const currentMinute = today.getMinutes();
+  const isToday = preferredDate === todayStr;
+
+  let customerCity = '';
+  if (customerAddress) {
+    const parts = customerAddress.split(',');
+    customerCity = parts[parts.length - 1] ? parts[parts.length - 1].trim().toLowerCase() : customerAddress.toLowerCase();
+  }
+
+  let providerProfile = null;
+  if (providerId) {
+    providerProfile = await ProviderProfile.findOne({
+      $or: [{ userId: providerId }, { _id: providerId }]
+    });
+  }
+
+  let activeBookings = [];
+  if (providerId) {
+    const pUserId = providerProfile ? providerProfile.userId : providerId;
+    activeBookings = await Booking.find({
+      $or: [{ providerId: pUserId }, { offeredTo: pUserId }],
+      preferredDate,
+      status: { $in: ['ACCEPTED', 'IN_PROGRESS', 'OFFERED', 'PENDING'] }
+    });
+  }
+
+  const bookedSlots = activeBookings.map(b => {
+    const { startHour, endHour } = getSlotHours(b.preferredTime);
+    const parts = (b.address || '').split(',');
+    const jobCity = parts[parts.length - 1] ? parts[parts.length - 1].trim().toLowerCase() : (b.address || '').toLowerCase();
+    return {
+      id: b._id,
+      service: b.service,
+      startHour,
+      endHour,
+      address: b.address,
+      jobCity
+    };
+  }).filter(b => b.startHour !== null && b.endHour !== null);
+
+  const slots = [];
+  const startHour = 9;  // 9:00 AM
+  const endHour = 21;   // 9:00 PM
+
+  for (let h = startHour; h < endHour; h++) {
+    const formatTime = (hour) => {
+      const period = hour >= 12 ? 'PM' : 'AM';
+      let displayHour = hour % 12;
+      if (displayHour === 0) displayHour = 12;
+      const strHour = displayHour < 10 ? `0${displayHour}` : `${displayHour}`;
+      return `${strHour}:00 ${period}`;
+    };
+
+    const sStartHour = h;
+    const sEndHour = h + 1;
+    const timeString = `${formatTime(sStartHour)} - ${formatTime(sEndHour)}`;
+
+    let status = 'AVAILABLE';
+    let disabled = false;
+    let reason = 'Available for booking';
+    let estimatedArrival = formatTime(sStartHour);
+
+    // 1. Check if past for today (only if slot ends before or at current hour)
+    if (isToday && sEndHour <= currentHour) {
+      status = 'PAST';
+      disabled = true;
+      reason = 'Time slot has ended';
+    } else {
+      const isOngoing = isToday && (currentHour >= sStartHour && currentHour < sEndHour);
+      if (isOngoing) {
+        status = 'ONGOING';
+        let arrMin = currentMinute + 15;
+        let arrHour = currentHour;
+        if (arrMin >= 60) {
+          arrHour += 1;
+          arrMin -= 60;
+        }
+        const arrPeriod = arrHour >= 12 ? 'PM' : 'AM';
+        let arrDispH = arrHour % 12;
+        if (arrDispH === 0) arrDispH = 12;
+        estimatedArrival = `${String(arrDispH).padStart(2, '0')}:${String(arrMin).padStart(2, '0')} ${arrPeriod}`;
+        reason = `Ongoing slot (Est. arrival: ${estimatedArrival})`;
+      }
+
+      // 2. Direct overlap check
+      const directConflict = bookedSlots.find(b => b.startHour < sEndHour && b.endHour > sStartHour);
+      if (directConflict) {
+        status = 'UNAVAILABLE';
+        disabled = true;
+        reason = `Occupied (Booked for ${directConflict.service || 'another service'})`;
+      } else if (providerId) {
+        // 3. Travel buffer calculation
+        const precedingBooking = bookedSlots
+          .filter(b => b.endHour <= sStartHour)
+          .sort((a, b) => b.endHour - a.endHour)[0];
+
+        if (precedingBooking) {
+          const sameCity = customerCity && precedingBooking.jobCity &&
+            (customerCity.includes(precedingBooking.jobCity) || precedingBooking.jobCity.includes(customerCity));
+          
+          const travelMinutes = sameCity ? 20 : 45;
+          const endHourMins = precedingBooking.endHour * 60;
+          const arrivalTotalMins = endHourMins + travelMinutes;
+          const arrH = Math.floor(arrivalTotalMins / 60);
+          const arrM = arrivalTotalMins % 60;
+
+          const arrPeriod = arrH >= 12 ? 'PM' : 'AM';
+          let arrDispH = arrH % 12;
+          if (arrDispH === 0) arrDispH = 12;
+          const formattedArr = `${String(arrDispH).padStart(2, '0')}:${String(arrM).padStart(2, '0')} ${arrPeriod}`;
+
+          if (arrivalTotalMins > sStartHour * 60 && arrivalTotalMins < sEndHour * 60) {
+            estimatedArrival = formattedArr;
+            reason = `Estimated arrival: ${formattedArr}`;
+          } else if (arrivalTotalMins >= sEndHour * 60) {
+            status = 'UNAVAILABLE';
+            disabled = true;
+            reason = `Insufficient travel time from previous job (Est. arrival: ${formattedArr})`;
+          } else {
+            reason = `Estimated arrival: ${formatTime(sStartHour)}`;
+          }
+        }
+      }
+    }
+
+    slots.push({
+      value: timeString,
+      label: timeString,
+      startHour: sStartHour,
+      endHour: sEndHour,
+      disabled,
+      status,
+      reason,
+      estimatedArrival
+    });
+  }
+
+  return slots;
+};
+
+// @desc    Get provider availability slots & ETAs for a date
+// @route   GET /api/bookings/availability
+// @access  Public or Private
+const getProviderAvailability = async (req, res) => {
+  try {
+    const { providerId, preferredDate, address } = req.query;
+
+    if (!preferredDate) {
+      return res.status(400).json({ message: 'preferredDate is required' });
+    }
+
+    const slots = await calculateProviderSlotAvailability(providerId, preferredDate, address);
+    res.json(slots);
+  } catch (error) {
+    console.error('Error fetching provider availability:', error);
+    res.status(500).json({ message: error.message || 'Server error fetching slot availability' });
+  }
 };
 
 // Helper algorithm: Calculate Provider Matching Score
@@ -577,6 +767,7 @@ module.exports = {
   createBooking,
   getCustomerBookings,
   getProviderBookings,
+  getProviderAvailability,
   acceptBooking,
   rejectBooking,
   startBooking,

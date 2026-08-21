@@ -74,11 +74,11 @@ const Footer = () => {
 
         {/* Bottom copyright */}
         <div className="pt-8 flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500 gap-4">
-          <p>© {new Date().getFullYear()} LocalConnect Platform. Designed for UDP & Placement Portfolio.</p>
+          <p>© {new Date().getFullYear()} LocalConnect Platform.</p>
           <div className="flex items-center gap-1">
             <span>Built with</span>
             <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500 inline" />
-            <span>using MERN Stack</span>
+            <span>In India</span>
           </div>
         </div>
       </div>

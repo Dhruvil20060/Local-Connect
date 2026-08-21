@@ -4,6 +4,7 @@ const {
   createBooking,
   getCustomerBookings,
   getProviderBookings,
+  getProviderAvailability,
   acceptBooking,
   rejectBooking,
   startBooking,
@@ -18,6 +19,7 @@ const { protect, customerOnly, providerOnly } = require('../middleware/authMiddl
 router.post('/', protect, customerOnly, createBooking);
 router.get('/my', protect, getCustomerBookings);
 router.get('/provider', protect, providerOnly, getProviderBookings);
+router.get('/availability', protect, getProviderAvailability);
 router.patch('/:id/accept', protect, providerOnly, acceptBooking);
 router.patch('/:id/reject', protect, providerOnly, rejectBooking);
 router.patch('/:id/start', protect, providerOnly, startBooking);

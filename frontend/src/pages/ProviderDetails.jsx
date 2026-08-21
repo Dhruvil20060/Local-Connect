@@ -7,6 +7,104 @@ import * as providerService from '../services/providerService';
 import * as bookingService from '../services/bookingService';
 import { Star, MapPin, Briefcase, IndianRupee, ShieldCheck, Calendar, Clock, AlertCircle, CheckCircle, Lock, X } from 'lucide-react';
 
+const getLocalDateStr = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getSlotHours = (preferredTime) => {
+  if (!preferredTime) return { startHour: null, endHour: null };
+  const matches = preferredTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/gi);
+  if (!matches || matches.length < 1) return { startHour: null, endHour: null };
+
+  const parseSingleTime = (timeStr) => {
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!match) return null;
+    let hour = parseInt(match[1], 10);
+    const period = match[3].toUpperCase();
+    if (period === 'PM' && hour < 12) hour += 12;
+    if (period === 'AM' && hour === 12) hour = 0;
+    return hour;
+  };
+
+  const startHour = parseSingleTime(matches[0]);
+  let endHour = matches.length >= 2 ? parseSingleTime(matches[1]) : (startHour !== null ? startHour + 1 : null);
+  if (endHour === 0 && startHour === 23) endHour = 24;
+
+  return { startHour, endHour };
+};
+
+const getSlotStartHour = (preferredTime) => {
+  return getSlotHours(preferredTime).startHour;
+};
+
+const generateTimeSlots = (selectedDateStr) => {
+  const todayStr = getLocalDateStr();
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  const isToday = selectedDateStr === todayStr;
+
+  const slots = [];
+  const startHour = 9; // 9:00 AM
+  const endHour = 21;  // 9:00 PM
+
+  for (let h = startHour; h < endHour; h++) {
+    const formatTime = (hour) => {
+      const period = hour >= 12 ? 'PM' : 'AM';
+      let displayHour = hour % 12;
+      if (displayHour === 0) displayHour = 12;
+      const strHour = displayHour < 10 ? `0${displayHour}` : `${displayHour}`;
+      return `${strHour}:00 ${period}`;
+    };
+
+    const sStart = h;
+    const sEnd = h + 1;
+    const startLabel = formatTime(sStart);
+    const endLabel = formatTime(sEnd);
+    const timeString = `${startLabel} - ${endLabel}`;
+
+    let status = 'AVAILABLE';
+    let isDisabled = false;
+    let reason = 'Available for booking';
+    let estimatedArrival = startLabel;
+
+    if (isToday && sEnd <= currentHour) {
+      status = 'PAST';
+      isDisabled = true;
+      reason = 'Time slot has ended';
+    } else if (isToday && currentHour >= sStart && currentHour < sEnd) {
+      status = 'ONGOING';
+      let arrMin = currentMinute + 15;
+      let arrHour = currentHour;
+      if (arrMin >= 60) {
+        arrHour += 1;
+        arrMin -= 60;
+      }
+      const arrPeriod = arrHour >= 12 ? 'PM' : 'AM';
+      let arrDispH = arrHour % 12;
+      if (arrDispH === 0) arrDispH = 12;
+      estimatedArrival = `${String(arrDispH).padStart(2, '0')}:${String(arrMin).padStart(2, '0')} ${arrPeriod}`;
+      reason = `Ongoing slot (Est. arrival: ${estimatedArrival})`;
+    }
+
+    slots.push({
+      value: timeString,
+      label: timeString,
+      startHour: sStart,
+      endHour: sEnd,
+      disabled: isDisabled,
+      status,
+      reason,
+      estimatedArrival
+    });
+  }
+
+  return slots;
+};
+
 const ProviderDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -20,12 +118,60 @@ const ProviderDetails = () => {
   const [bookingForm, setBookingForm] = useState({
     problemDescription: '',
     address: '',
-    preferredDate: new Date().toISOString().split('T')[0],
-    preferredTime: '09:00 AM - 11:00 AM'
+    preferredDate: getLocalDateStr(),
+    preferredTime: ''
   });
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingError, setBookingError] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
+
+  const [slotList, setSlotList] = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  // Fetch DB-driven slot availability whenever modal open, date, provider or address changes
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAvailability = async () => {
+      if (!showBookingModal) return;
+      setLoadingSlots(true);
+      try {
+        const pId = provider?.userId?._id || provider?.userId || provider?._id || id;
+        const data = await bookingService.getProviderAvailability({
+          providerId: pId,
+          preferredDate: bookingForm.preferredDate,
+          address: bookingForm.address
+        });
+        if (isMounted && Array.isArray(data) && data.length > 0) {
+          setSlotList(data);
+        } else if (isMounted) {
+          setSlotList(generateTimeSlots(bookingForm.preferredDate));
+        }
+      } catch (err) {
+        console.error('Error loading provider availability:', err);
+        if (isMounted) setSlotList(generateTimeSlots(bookingForm.preferredDate));
+      } finally {
+        if (isMounted) setLoadingSlots(false);
+      }
+    };
+
+    fetchAvailability();
+    return () => { isMounted = false; };
+  }, [showBookingModal, bookingForm.preferredDate, provider, id]);
+
+  const displaySlots = slotList.length > 0 ? slotList : generateTimeSlots(bookingForm.preferredDate);
+
+  // Auto-select valid slot if current selection is invalid or disabled
+  useEffect(() => {
+    if (!showBookingModal) return;
+    const currentValid = displaySlots.find(s => s.value === bookingForm.preferredTime && !s.disabled);
+    if (!currentValid) {
+      const firstAvailable = displaySlots.find(s => !s.disabled);
+      setBookingForm(prev => ({
+        ...prev,
+        preferredTime: firstAvailable ? firstAvailable.value : ''
+      }));
+    }
+  }, [showBookingModal, bookingForm.preferredDate, displaySlots]);
 
   useEffect(() => {
     const fetchProviderDetails = async () => {
@@ -56,7 +202,7 @@ const ProviderDetails = () => {
 
     // Date & Time Validation Rule
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = getLocalDateStr(today);
     if (bookingForm.preferredDate < todayStr) {
       setBookingError('Preferred booking date cannot be in the past.');
       return;
@@ -64,16 +210,18 @@ const ProviderDetails = () => {
 
     if (bookingForm.preferredDate === todayStr) {
       const currentHour = today.getHours();
-      let slotEndHour = 24;
-      if (bookingForm.preferredTime.includes('09:00 AM')) slotEndHour = 11;
-      else if (bookingForm.preferredTime.includes('11:00 AM')) slotEndHour = 13;
-      else if (bookingForm.preferredTime.includes('02:00 PM')) slotEndHour = 16;
-      else if (bookingForm.preferredTime.includes('04:00 PM')) slotEndHour = 18;
+      const { endHour } = getSlotHours(bookingForm.preferredTime);
 
-      if (currentHour >= slotEndHour) {
+      if (!bookingForm.preferredTime || (endHour !== null && endHour <= currentHour)) {
         setBookingError('The selected time slot has already passed for today. Please select a future time slot.');
         return;
       }
+    }
+
+    const chosenSlot = displaySlots.find(s => s.value === bookingForm.preferredTime);
+    if (chosenSlot && chosenSlot.disabled) {
+      setBookingError(`Selected time slot is unavailable: ${chosenSlot.reason}`);
+      return;
     }
 
     setBookingSubmitting(true);
@@ -347,7 +495,7 @@ const ProviderDetails = () => {
                     <input
                       type="date"
                       required
-                      min={new Date().toISOString().split('T')[0]}
+                      min={getLocalDateStr()}
                       value={bookingForm.preferredDate}
                       onChange={(e) => setBookingForm({ ...bookingForm, preferredDate: e.target.value })}
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden"
@@ -355,17 +503,49 @@ const ProviderDetails = () => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Preferred Time</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Preferred Time {loadingSlots && <span className="text-slate-400 font-normal">(checking availability...)</span>}
+                    </label>
                     <select
                       value={bookingForm.preferredTime}
                       onChange={(e) => setBookingForm({ ...bookingForm, preferredTime: e.target.value })}
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-600 focus:outline-hidden font-medium"
                     >
-                      <option value="09:00 AM - 11:00 AM">09:00 AM - 11:00 AM</option>
-                      <option value="11:00 AM - 01:00 PM">11:00 AM - 01:00 PM</option>
-                      <option value="02:00 PM - 04:00 PM">02:00 PM - 04:00 PM</option>
-                      <option value="04:00 PM - 06:00 PM">04:00 PM - 06:00 PM</option>
+                      {displaySlots.every(s => s.disabled) && (
+                        <option value="" disabled>No available slots for this date</option>
+                      )}
+                      {displaySlots.map((slot) => {
+                        let badgeStr = '';
+                        if (slot.status === 'ONGOING') badgeStr = ' • Ongoing Slot';
+                        else if (slot.disabled && slot.status === 'UNAVAILABLE') badgeStr = ` • ${slot.reason}`;
+                        else if (slot.disabled && slot.status === 'PAST') badgeStr = ' • Ended';
+                        else if (slot.estimatedArrival && slot.reason && slot.reason.includes('Estimated arrival:')) badgeStr = ` • ${slot.reason}`;
+
+                        return (
+                          <option key={slot.value} value={slot.value} disabled={slot.disabled}>
+                            {slot.label}{badgeStr}
+                          </option>
+                        );
+                      })}
                     </select>
+
+                    {/* ETA & Slot Status Info Badge */}
+                    {(() => {
+                      const selectedSlot = displaySlots.find(s => s.value === bookingForm.preferredTime);
+                      if (!selectedSlot) return null;
+                      return (
+                        <div className={`mt-2 p-2.5 rounded-xl text-xs font-medium flex items-center gap-2 border ${
+                          selectedSlot.disabled
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : selectedSlot.status === 'ONGOING'
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                        }`}>
+                          <Clock className="w-4 h-4 shrink-0 text-current" />
+                          <span>{selectedSlot.reason || `Est. arrival: ${selectedSlot.estimatedArrival}`}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
