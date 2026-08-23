@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import BookingCard from '../components/BookingCard';
@@ -6,10 +6,13 @@ import * as bookingService from '../services/bookingService';
 import * as reviewService from '../services/reviewService';
 import { Calendar, CheckCircle2, Clock, Star, X, AlertCircle, CreditCard, QrCode, ShieldCheck, Check } from 'lucide-react';
 
+const POLLING_INTERVAL = 5000;
+
 const CustomerDashboard = () => {
   const { user } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const isMounted = useRef(true);
 
   // Active Tab Filter
   const [activeTab, setActiveTab] = useState('All');
@@ -28,33 +31,45 @@ const CustomerDashboard = () => {
   const [paymentError, setPaymentError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  const fetchBookings = async () => {
+  const fetchBookings = async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     try {
       const data = await bookingService.getCustomerBookings();
-      setBookings(data);
 
-      // Auto-trigger review modal for completed/closed booking if not reviewed
-      const unreviewedCompleted = data.find(
-        (b) => ['Completed', 'COMPLETED', 'CLOSED'].includes(b.status) && !b.hasReviewed
-      );
-      if (unreviewedCompleted && !selectedBookingForReview && !selectedBookingForPayment) {
-        // Optional auto-open after data load
-      }
+      if (!isMounted.current) return;
+
+      setBookings(data);
     } catch (error) {
       console.error('Error fetching customer bookings:', error);
     } finally {
-      setLoading(false);
+      if (isMounted.current && isInitial) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchBookings();
+    isMounted.current = true;
+    fetchBookings(true);
+
+    const interval = setInterval(() => {
+      if (isMounted.current) {
+        fetchBookings(false);
+      }
+    }, POLLING_INTERVAL);
+
+    return () => {
+      isMounted.current = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleUpdateStatus = async (bookingId, newStatus) => {
     try {
       await bookingService.updateBookingStatus(bookingId, newStatus);
-      fetchBookings();
+      fetchBookings(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Status update failed.');
     }
@@ -91,7 +106,7 @@ const CustomerDashboard = () => {
       setReviewSuccess(true);
       setTimeout(() => {
         setSelectedBookingForReview(null);
-        fetchBookings();
+        fetchBookings(false);
       }, 1200);
     } catch (err) {
       setReviewError(err.response?.data?.message || 'Failed to submit review.');
@@ -111,7 +126,7 @@ const CustomerDashboard = () => {
       setTimeout(() => {
         setSelectedBookingForPayment(null);
         setPaymentSuccess(false);
-        fetchBookings();
+        fetchBookings(false);
       }, 1500);
     } catch (err) {
       setPaymentError(err.response?.data?.message || 'Failed to update payment status.');

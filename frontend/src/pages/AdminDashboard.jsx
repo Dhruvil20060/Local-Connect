@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Loader from '../components/Loader';
 import { useAuth } from '../context/AuthContext';
 import * as adminService from '../services/adminService';
 import { ShieldCheck, Users, Briefcase, Calendar, Star, Trash2, CheckCircle, Clock, Check, X } from 'lucide-react';
+
+const POLLING_INTERVAL = 5000;
 
 const AdminDashboard = () => {
   const { user: currentUser } = useAuth();
@@ -16,11 +18,15 @@ const AdminDashboard = () => {
   const [deactivationRequests, setDeactivationRequests] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  const isMounted = useRef(true);
 
   const isMasterAdmin = currentUser?.role === 'admin';
   const isSubAdmin = currentUser?.role === 'subadmin';
 
-  const fetchAdminData = async () => {
+  const fetchAdminData = async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     try {
       const [statsData, usersData, providersData, bookingsData, reviewsData, requestsData] = await Promise.all([
         adminService.getAdminStats(),
@@ -31,6 +37,8 @@ const AdminDashboard = () => {
         adminService.getDeactivationRequests()
       ]);
 
+      if (!isMounted.current) return;
+
       setStats(statsData);
       setUsers(usersData);
       setProviders(providersData);
@@ -40,12 +48,26 @@ const AdminDashboard = () => {
     } catch (error) {
       console.error('Error fetching admin dashboard data:', error);
     } finally {
-      setLoading(false);
+      if (isMounted.current && isInitial) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchAdminData();
+    isMounted.current = true;
+    fetchAdminData(true);
+
+    const interval = setInterval(() => {
+      if (isMounted.current) {
+        fetchAdminData(false);
+      }
+    }, POLLING_INTERVAL);
+
+    return () => {
+      isMounted.current = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleToggleUserActive = async (userToToggle) => {
@@ -62,7 +84,7 @@ const AdminDashboard = () => {
         alert(res.message);
       }
 
-      fetchAdminData();
+      fetchAdminData(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to update user status');
     }
@@ -72,7 +94,7 @@ const AdminDashboard = () => {
     try {
       const res = await adminService.respondDeactivationRequest(requestId, action);
       alert(res.message || `Request ${action.toLowerCase()}ed successfully`);
-      fetchAdminData();
+      fetchAdminData(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to respond to deactivation request');
     }
@@ -81,7 +103,7 @@ const AdminDashboard = () => {
   const handleToggleProviderVerify = async (providerId) => {
     try {
       await adminService.toggleProviderVerification(providerId);
-      fetchAdminData();
+      fetchAdminData(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to toggle provider verification');
     }
@@ -91,7 +113,7 @@ const AdminDashboard = () => {
     if (!window.confirm('Are you sure you want to delete this review?')) return;
     try {
       await adminService.deleteReview(reviewId);
-      fetchAdminData();
+      fetchAdminData(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to delete review');
     }

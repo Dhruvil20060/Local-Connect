@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Loader from '../components/Loader';
 import BookingCard from '../components/BookingCard';
@@ -6,11 +6,14 @@ import * as bookingService from '../services/bookingService';
 import * as providerService from '../services/providerService';
 import { Bell, CheckCircle2, Clock, Star, PlayCircle, ToggleLeft, ToggleRight, Check, X, MapPin, Phone, QrCode, CreditCard, AlertCircle, Camera, Upload, Briefcase, IndianRupee } from 'lucide-react';
 
+const POLLING_INTERVAL = 5000;
+
 const ProviderDashboard = () => {
   const { user } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const isMounted = useRef(true);
   const [availability, setAvailability] = useState('Available');
 
   // Filter tab state
@@ -36,12 +39,18 @@ const ProviderDashboard = () => {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState('');
 
-  const fetchData = async () => {
+  const fetchData = async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     try {
       const [bookingsData, profileData] = await Promise.all([
         bookingService.getProviderBookings(),
         providerService.getMyProviderProfile()
       ]);
+
+      if (!isMounted.current) return;
+
       setBookings(bookingsData);
       setProfile(profileData);
       if (profileData && profileData.availability) {
@@ -50,18 +59,33 @@ const ProviderDashboard = () => {
     } catch (error) {
       console.error('Error loading provider dashboard data:', error);
     } finally {
-      setLoading(false);
+      if (isMounted.current && isInitial) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchData();
+    isMounted.current = true;
+    fetchData(true);
+
+    const interval = setInterval(() => {
+      if (isMounted.current) {
+        fetchData(false);
+      }
+    }, POLLING_INTERVAL);
+
+    return () => {
+      isMounted.current = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleAvailabilityToggle = async (newStatus) => {
     try {
       setAvailability(newStatus);
       await providerService.updateAvailability(newStatus);
+      fetchData(false);
     } catch (error) {
       console.error('Failed to update availability status:', error);
     }
@@ -80,10 +104,10 @@ const ProviderDashboard = () => {
       } else {
         await bookingService.updateBookingStatus(bookingId, newStatus);
       }
-      fetchData();
+      fetchData(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Action failed.');
-      fetchData();
+      fetchData(false);
     }
   };
 
@@ -94,7 +118,7 @@ const ProviderDashboard = () => {
     try {
       await bookingService.completeBooking(bookingForCompleteModal._id);
       setBookingForCompleteModal(null);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       setActionError(err.response?.data?.message || 'Failed to mark job completed.');
     } finally {
@@ -109,7 +133,7 @@ const ProviderDashboard = () => {
     try {
       await bookingService.confirmPaymentReceived(bookingForPaymentConfirmModal._id);
       setBookingForPaymentConfirmModal(null);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       setActionError(err.response?.data?.message || 'Failed to confirm payment.');
     } finally {
@@ -140,6 +164,7 @@ const ProviderDashboard = () => {
       const updated = await providerService.updateProfile(editFormData);
       setProfile(updated);
       setShowEditProfileModal(false);
+      fetchData(false);
     } catch (err) {
       setProfileSaveError(err.response?.data?.message || 'Failed to update profile.');
     } finally {
