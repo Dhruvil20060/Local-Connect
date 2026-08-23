@@ -34,15 +34,23 @@ const protect = async (req, res, next) => {
 };
 
 const adminOnly = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
+  if (req.user && (req.user.role === 'admin' || req.user.role === 'subadmin')) {
     next();
   } else {
     res.status(403).json({ message: 'Access forbidden: Admin privilege required' });
   }
 };
 
+const masterAdminOnly = (req, res, next) => {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ message: 'Access forbidden: Master Admin privilege required' });
+  }
+};
+
 const providerOnly = (req, res, next) => {
-  if (req.user && (req.user.role === 'provider' || req.user.role === 'admin')) {
+  if (req.user && (req.user.role === 'provider' || req.user.role === 'admin' || req.user.role === 'subadmin')) {
     next();
   } else {
     res.status(403).json({ message: 'Access forbidden: Provider privilege required' });
@@ -50,12 +58,13 @@ const providerOnly = (req, res, next) => {
 };
 
 const customerOnly = (req, res, next) => {
-  if (req.user && (req.user.role === 'customer' || req.user.role === 'admin')) {
+  if (req.user && (req.user.role === 'customer' || req.user.role === 'admin' || req.user.role === 'subadmin')) {
     next();
   } else {
     res.status(403).json({ message: 'Access forbidden: Customer privilege required' });
   }
 };
 
-module.exports = { protect, adminOnly, providerOnly, customerOnly };
+module.exports = { protect, adminOnly, masterAdminOnly, providerOnly, customerOnly };
+
 

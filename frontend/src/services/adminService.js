@@ -48,3 +48,16 @@ export const deleteReview = async (reviewId) => {
   const response = await API.delete(`/admin/reviews/${reviewId}`);
   return response.data;
 };
+
+// Fetch all deactivation requests
+export const getDeactivationRequests = async () => {
+  const response = await API.get('/admin/deactivation-requests');
+  return response.data;
+};
+
+// Respond to deactivation request (Master Admin approval/rejection)
+export const respondDeactivationRequest = async (requestId, action) => {
+  const response = await API.put(`/admin/deactivation-requests/${requestId}/respond`, { action });
+  return response.data;
+};
+

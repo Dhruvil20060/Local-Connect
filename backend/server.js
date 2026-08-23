@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
+const seedAdmin = require('./config/seedAdmin');
 
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -48,9 +49,10 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Initialize Database Connection
+// Initialize Database Connection & Seed Admin Accounts
 const startServer = async () => {
   await connectDB();
+  await seedAdmin();
 };
 
 // Start server locally

@@ -8,9 +8,11 @@ const {
   toggleProviderVerification,
   getAllBookings,
   getAllReviews,
-  deleteReview
+  deleteReview,
+  getDeactivationRequests,
+  respondDeactivationRequest
 } = require('../controllers/adminController');
-const { protect, adminOnly } = require('../middleware/authMiddleware');
+const { protect, adminOnly, masterAdminOnly } = require('../middleware/authMiddleware');
 
 router.get('/stats', protect, adminOnly, getAdminStats);
 router.get('/users', protect, adminOnly, getAllUsers);
@@ -22,5 +24,10 @@ router.get('/bookings', protect, adminOnly, getAllBookings);
 router.get('/reviews', protect, adminOnly, getAllReviews);
 router.delete('/reviews/:id', protect, adminOnly, deleteReview);
 
+// Deactivation Approval Routes
+router.get('/deactivation-requests', protect, adminOnly, getDeactivationRequests);
+router.put('/deactivation-requests/:id/respond', protect, masterAdminOnly, respondDeactivationRequest);
+
 module.exports = router;
+
 

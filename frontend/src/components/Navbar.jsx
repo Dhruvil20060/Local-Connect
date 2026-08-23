@@ -16,7 +16,7 @@ const Navbar = () => {
 
   const getDashboardPath = () => {
     if (!user) return '/login';
-    if (user.role === 'admin') return '/admin/dashboard';
+    if (user.role === 'admin' || user.role === 'subadmin') return '/admin/dashboard';
     if (user.role === 'provider') return '/provider/dashboard';
     return '/customer/dashboard';
   };

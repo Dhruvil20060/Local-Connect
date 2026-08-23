@@ -2,10 +2,11 @@ const User = require('../models/User');
 const ProviderProfile = require('../models/ProviderProfile');
 const Booking = require('../models/Booking');
 const Review = require('../models/Review');
+const DeactivationRequest = require('../models/DeactivationRequest');
 
 // @desc    Get Admin Dashboard Stats from real MongoDB data
 // @route   GET /api/admin/stats
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const getAdminStats = async (req, res) => {
   try {
     const totalCustomers = await User.countDocuments({ role: 'customer' });
@@ -15,13 +16,15 @@ const getAdminStats = async (req, res) => {
     const totalBookings = await Booking.countDocuments();
     const completedBookings = await Booking.countDocuments({ status: { $in: ['COMPLETED', 'CLOSED'] } });
     const totalReviews = await Review.countDocuments();
+    const pendingDeactivationRequests = await DeactivationRequest.countDocuments({ status: 'PENDING' });
 
     res.json({
       totalCustomers,
       totalProviders,
       totalBookings,
       completedBookings,
-      totalReviews
+      totalReviews,
+      pendingDeactivationRequests
     });
   } catch (error) {
     console.error('Error fetching admin stats:', error);
@@ -31,10 +34,12 @@ const getAdminStats = async (req, res) => {
 
 // @desc    Get all users from MongoDB Users collection
 // @route   GET /api/admin/users
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const getAllUsers = async (req, res) => {
   try {
     const users = await User.find().select('-password').sort({ createdAt: -1 });
+    const pendingRequests = await DeactivationRequest.find({ status: 'PENDING' });
+    const pendingUserIds = new Set(pendingRequests.map((r) => r.targetUser.toString()));
 
     const formattedUsers = users.map((u) => ({
       _id: u._id,
@@ -43,6 +48,7 @@ const getAllUsers = async (req, res) => {
       phone: u.phone,
       role: u.role,
       isActive: u.isActive !== undefined ? u.isActive : true,
+      deactivationPending: pendingUserIds.has(u._id.toString()),
       createdAt: u.createdAt
     }));
 
@@ -53,14 +59,14 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-// @desc    Update / Toggle User active status (Activate / Deactivate)
+// @desc    Update / Toggle User active status (Activate / Deactivate or Request Deactivation if Sub-Admin)
 // @route   PATCH /api/admin/users/:id/status
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const updateUserStatus = async (req, res) => {
   try {
     const userId = req.params.id;
 
-    // Admin account cannot deactivate itself
+    // Admin / Sub-Admin account cannot deactivate itself
     if (req.user && req.user._id.toString() === userId.toString()) {
       return res.status(400).json({ message: 'Admin account cannot deactivate itself' });
     }
@@ -70,17 +76,64 @@ const updateUserStatus = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    if (user.role === 'admin') {
+    if (user.role === 'admin' || user.role === 'subadmin') {
       return res.status(400).json({ message: 'Admin accounts cannot be deactivated' });
     }
 
+    let targetIsActive = user.isActive;
     if (typeof req.body.isActive === 'boolean') {
-      user.isActive = req.body.isActive;
+      targetIsActive = req.body.isActive;
     } else {
-      user.isActive = user.isActive !== undefined ? !user.isActive : false;
+      targetIsActive = !user.isActive;
     }
 
+    // If sub-admin attempts to DEACTIVATE an active user:
+    if (req.user.role === 'subadmin' && !targetIsActive) {
+      const existingRequest = await DeactivationRequest.findOne({
+        targetUser: userId,
+        status: 'PENDING'
+      });
+
+      if (existingRequest) {
+        return res.status(400).json({
+          message: 'A deactivation request for this user is already pending Master Admin approval',
+          deactivationPending: true
+        });
+      }
+
+      await DeactivationRequest.create({
+        targetUser: userId,
+        requestedBy: req.user._id,
+        reason: req.body.reason || 'Deactivation requested by sub-admin'
+      });
+
+      return res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isActive: user.isActive,
+        deactivationPending: true,
+        message: 'Deactivation request submitted for Master Admin approval.'
+      });
+    }
+
+    // Master Admin direct activation/deactivation OR Sub-Admin activating a deactivated account:
+    user.isActive = targetIsActive;
     await user.save();
+
+    if (targetIsActive === false) {
+      await DeactivationRequest.updateMany(
+        { targetUser: userId, status: 'PENDING' },
+        { status: 'APPROVED' }
+      );
+    } else {
+      await DeactivationRequest.updateMany(
+        { targetUser: userId, status: 'PENDING' },
+        { status: 'REJECTED' }
+      );
+    }
 
     res.json({
       _id: user._id,
@@ -88,7 +141,8 @@ const updateUserStatus = async (req, res) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      isActive: user.isActive
+      isActive: user.isActive,
+      deactivationPending: false
     });
   } catch (error) {
     console.error('Error updating user status:', error);
@@ -98,11 +152,13 @@ const updateUserStatus = async (req, res) => {
 
 // @desc    Get all providers from MongoDB (User role='provider' + ProviderProfile)
 // @route   GET /api/admin/providers
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const getAllProviders = async (req, res) => {
   try {
     const providerUsers = await User.find({ role: 'provider' }).select('-password');
     const profiles = await ProviderProfile.find();
+    const pendingRequests = await DeactivationRequest.find({ status: 'PENDING' });
+    const pendingUserIds = new Set(pendingRequests.map((r) => r.targetUser.toString()));
 
     const result = providerUsers.map((u) => {
       const profile = profiles.find((p) => p.userId.toString() === u._id.toString());
@@ -112,7 +168,8 @@ const getAllProviders = async (req, res) => {
           _id: u._id,
           name: u.name,
           email: u.email,
-          phone: u.phone
+          phone: u.phone,
+          isActive: u.isActive !== undefined ? u.isActive : true
         },
         profession: profile ? profile.profession : 'N/A',
         experience: profile ? profile.experience : 0,
@@ -124,7 +181,9 @@ const getAllProviders = async (req, res) => {
         availability: profile ? profile.availability : 'Available',
         isVerified: profile ? profile.isVerified : false,
         averageRating: profile ? profile.averageRating : 0,
-        totalReviews: profile ? profile.totalReviews : 0
+        totalReviews: profile ? profile.totalReviews : 0,
+        isActive: u.isActive !== undefined ? u.isActive : true,
+        deactivationPending: pendingUserIds.has(u._id.toString())
       };
     });
 
@@ -137,7 +196,7 @@ const getAllProviders = async (req, res) => {
 
 // @desc    Toggle Provider Verification Status
 // @route   PUT /api/admin/providers/:id/toggle-verify
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const toggleProviderVerification = async (req, res) => {
   try {
     let profile = await ProviderProfile.findById(req.params.id);
@@ -162,7 +221,7 @@ const toggleProviderVerification = async (req, res) => {
 
 // @desc    Get all bookings from MongoDB
 // @route   GET /api/admin/bookings
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const getAllBookings = async (req, res) => {
   try {
     const bookings = await Booking.find()
@@ -198,7 +257,7 @@ const getAllBookings = async (req, res) => {
 
 // @desc    Get all reviews from MongoDB
 // @route   GET /api/admin/reviews
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const getAllReviews = async (req, res) => {
   try {
     const reviews = await Review.find()
@@ -225,7 +284,7 @@ const getAllReviews = async (req, res) => {
 
 // @desc    Delete review from MongoDB & update provider stats
 // @route   DELETE /api/admin/reviews/:id
-// @access  Private (Admin)
+// @access  Private (Admin & Sub-Admin)
 const deleteReview = async (req, res) => {
   try {
     const review = await Review.findById(req.params.id);
@@ -256,6 +315,61 @@ const deleteReview = async (req, res) => {
   }
 };
 
+// @desc    Get all deactivation requests
+// @route   GET /api/admin/deactivation-requests
+// @access  Private (Admin & Sub-Admin)
+const getDeactivationRequests = async (req, res) => {
+  try {
+    const requests = await DeactivationRequest.find()
+      .populate('targetUser', 'name email role isActive')
+      .populate('requestedBy', 'name email role')
+      .sort({ createdAt: -1 });
+
+    res.json(requests);
+  } catch (error) {
+    console.error('Error fetching deactivation requests:', error);
+    res.status(500).json({ message: error.message || 'Server error fetching deactivation requests' });
+  }
+};
+
+// @desc    Master Admin responds to deactivation request (Approve or Reject)
+// @route   PUT /api/admin/deactivation-requests/:id/respond
+// @access  Private (Master Admin only)
+const respondDeactivationRequest = async (req, res) => {
+  try {
+    const { action } = req.body;
+    if (!['APPROVE', 'REJECT'].includes(action)) {
+      return res.status(400).json({ message: 'Invalid action. Must be APPROVE or REJECT' });
+    }
+
+    const deactivationReq = await DeactivationRequest.findById(req.params.id);
+    if (!deactivationReq) {
+      return res.status(404).json({ message: 'Deactivation request not found' });
+    }
+
+    if (action === 'APPROVE') {
+      const user = await User.findById(deactivationReq.targetUser);
+      if (user) {
+        user.isActive = false;
+        await user.save();
+      }
+      deactivationReq.status = 'APPROVED';
+    } else {
+      deactivationReq.status = 'REJECTED';
+    }
+
+    await deactivationReq.save();
+
+    res.json({
+      message: `Deactivation request ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully`,
+      request: deactivationReq
+    });
+  } catch (error) {
+    console.error('Error responding to deactivation request:', error);
+    res.status(500).json({ message: error.message || 'Server error responding to deactivation request' });
+  }
+};
+
 module.exports = {
   getAdminStats,
   getAllUsers,
@@ -264,5 +378,8 @@ module.exports = {
   toggleProviderVerification,
   getAllBookings,
   getAllReviews,
-  deleteReview
+  deleteReview,
+  getDeactivationRequests,
+  respondDeactivationRequest
 };
+
