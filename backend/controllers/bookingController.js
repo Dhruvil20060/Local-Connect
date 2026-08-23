@@ -30,13 +30,41 @@ const getSlotStartHour = (preferredTime) => {
   return getSlotHours(preferredTime).startHour;
 };
 
+// Explicit IST (Asia/Kolkata) date & time parser for server-independent calculations
+const getISTDateParts = (d = new Date()) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(d);
+  const map = {};
+  parts.forEach(p => {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  });
+
+  let hour = parseInt(map.hour, 10);
+  if (hour === 24) hour = 0;
+
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    dateStr: `${map.year}-${map.month}-${map.day}`,
+    hour,
+    minute: parseInt(map.minute, 10)
+  };
+};
+
 // Helper to check date/time slot validity
 const validateBookingDateTime = (preferredDate, preferredTime) => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
+  const { dateStr: todayStr, hour: currentHour } = getISTDateParts();
 
   // 1. Date cannot be before today
   if (preferredDate < todayStr) {
@@ -45,7 +73,6 @@ const validateBookingDateTime = (preferredDate, preferredTime) => {
 
   // 2. If date is today, check if preferred time slot has completely ended
   if (preferredDate === todayStr && preferredTime) {
-    const currentHour = today.getHours();
     const { endHour } = getSlotHours(preferredTime);
 
     // Slot is only past if it has completely ended (endHour <= currentHour)
@@ -59,14 +86,9 @@ const validateBookingDateTime = (preferredDate, preferredTime) => {
 
 // Calculate database-driven slot availability and travel ETAs for a provider
 const calculateProviderSlotAvailability = async (providerId, preferredDate, customerAddress = '') => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
-  const currentHour = today.getHours();
-  const currentMinute = today.getMinutes();
+  const { dateStr: todayStr, hour: currentHour, minute: currentMinute } = getISTDateParts();
   const isToday = preferredDate === todayStr;
+  const isPast = preferredDate < todayStr;
 
   let customerCity = '';
   if (customerAddress) {
@@ -127,8 +149,12 @@ const calculateProviderSlotAvailability = async (providerId, preferredDate, cust
     let reason = 'Available for booking';
     let estimatedArrival = formatTime(sStartHour);
 
-    // 1. Check if past for today (only if slot ends before or at current hour)
-    if (isToday && sEndHour <= currentHour) {
+    // 1. Check if past for today or past date (slot ends before or at current hour)
+    if (isPast) {
+      status = 'PAST';
+      disabled = true;
+      reason = 'Time slot has ended';
+    } else if (isToday && sEndHour <= currentHour) {
       status = 'PAST';
       disabled = true;
       reason = 'Time slot has ended';

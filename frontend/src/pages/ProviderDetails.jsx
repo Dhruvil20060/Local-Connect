@@ -7,11 +7,39 @@ import * as providerService from '../services/providerService';
 import * as bookingService from '../services/bookingService';
 import { Star, MapPin, Briefcase, IndianRupee, ShieldCheck, Calendar, Clock, AlertCircle, CheckCircle, Lock, X } from 'lucide-react';
 
+const getISTDateParts = (d = new Date()) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(d);
+  const map = {};
+  parts.forEach(p => {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  });
+
+  let hour = parseInt(map.hour, 10);
+  if (hour === 24) hour = 0;
+
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    dateStr: `${map.year}-${map.month}-${map.day}`,
+    hour,
+    minute: parseInt(map.minute, 10)
+  };
+};
+
 const getLocalDateStr = (d = new Date()) => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return getISTDateParts(d).dateStr;
 };
 
 const getSlotHours = (preferredTime) => {
@@ -41,11 +69,9 @@ const getSlotStartHour = (preferredTime) => {
 };
 
 const generateTimeSlots = (selectedDateStr) => {
-  const todayStr = getLocalDateStr();
-  const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
+  const { dateStr: todayStr, hour: currentHour, minute: currentMinute } = getISTDateParts();
   const isToday = selectedDateStr === todayStr;
+  const isPast = selectedDateStr < todayStr;
 
   const slots = [];
   const startHour = 9; // 9:00 AM
@@ -71,7 +97,11 @@ const generateTimeSlots = (selectedDateStr) => {
     let reason = 'Available for booking';
     let estimatedArrival = startLabel;
 
-    if (isToday && sEnd <= currentHour) {
+    if (isPast) {
+      status = 'PAST';
+      isDisabled = true;
+      reason = 'Time slot has ended';
+    } else if (isToday && sEnd <= currentHour) {
       status = 'PAST';
       isDisabled = true;
       reason = 'Time slot has ended';
@@ -201,15 +231,13 @@ const ProviderDetails = () => {
     setBookingError('');
 
     // Date & Time Validation Rule
-    const today = new Date();
-    const todayStr = getLocalDateStr(today);
+    const { dateStr: todayStr, hour: currentHour } = getISTDateParts();
     if (bookingForm.preferredDate < todayStr) {
       setBookingError('Preferred booking date cannot be in the past.');
       return;
     }
 
     if (bookingForm.preferredDate === todayStr) {
-      const currentHour = today.getHours();
       const { endHour } = getSlotHours(bookingForm.preferredTime);
 
       if (!bookingForm.preferredTime || (endHour !== null && endHour <= currentHour)) {
