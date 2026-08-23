@@ -12,6 +12,11 @@ const deactivationRequestSchema = new mongoose.Schema(
       ref: 'User',
       required: true
     },
+    requestType: {
+      type: String,
+      enum: ['DEACTIVATE', 'ACTIVATE'],
+      default: 'DEACTIVATE'
+    },
     status: {
       type: String,
       enum: ['PENDING', 'APPROVED', 'REJECTED'],

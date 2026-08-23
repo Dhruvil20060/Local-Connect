@@ -39,7 +39,10 @@ const getAllUsers = async (req, res) => {
   try {
     const users = await User.find().select('-password').sort({ createdAt: -1 });
     const pendingRequests = await DeactivationRequest.find({ status: 'PENDING' });
-    const pendingUserIds = new Set(pendingRequests.map((r) => r.targetUser.toString()));
+    const pendingUserMap = new Map();
+    pendingRequests.forEach((r) => {
+      pendingUserMap.set(r.targetUser.toString(), r.requestType || 'DEACTIVATE');
+    });
 
     const formattedUsers = users.map((u) => ({
       _id: u._id,
@@ -48,7 +51,8 @@ const getAllUsers = async (req, res) => {
       phone: u.phone,
       role: u.role,
       isActive: u.isActive !== undefined ? u.isActive : true,
-      deactivationPending: pendingUserIds.has(u._id.toString()),
+      deactivationPending: pendingUserMap.has(u._id.toString()),
+      pendingRequestType: pendingUserMap.get(u._id.toString()) || null,
       createdAt: u.createdAt
     }));
 
@@ -59,7 +63,7 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-// @desc    Update / Toggle User active status (Activate / Deactivate or Request Deactivation if Sub-Admin)
+// @desc    Update / Toggle User active status (Activate / Deactivate or Request Approval if Sub-Admin)
 // @route   PATCH /api/admin/users/:id/status
 // @access  Private (Admin & Sub-Admin)
 const updateUserStatus = async (req, res) => {
@@ -87,24 +91,32 @@ const updateUserStatus = async (req, res) => {
       targetIsActive = !user.isActive;
     }
 
-    // If sub-admin attempts to DEACTIVATE an active user:
-    if (req.user.role === 'subadmin' && !targetIsActive) {
+    // If sub-admin attempts to DEACTIVATE or ACTIVATE a user:
+    if (req.user.role === 'subadmin') {
       const existingRequest = await DeactivationRequest.findOne({
         targetUser: userId,
         status: 'PENDING'
       });
 
       if (existingRequest) {
+        const reqActionStr = existingRequest.requestType === 'ACTIVATE' ? 'an activation' : 'a deactivation';
         return res.status(400).json({
-          message: 'A deactivation request for this user is already pending Master Admin approval',
-          deactivationPending: true
+          message: `A request (${reqActionStr}) for this user is already pending Master Admin approval`,
+          deactivationPending: true,
+          pendingRequestType: existingRequest.requestType || 'DEACTIVATE'
         });
       }
+
+      const requestType = targetIsActive ? 'ACTIVATE' : 'DEACTIVATE';
+      const defaultReason = targetIsActive
+        ? 'Activation requested by sub-admin'
+        : 'Deactivation requested by sub-admin';
 
       await DeactivationRequest.create({
         targetUser: userId,
         requestedBy: req.user._id,
-        reason: req.body.reason || 'Deactivation requested by sub-admin'
+        requestType,
+        reason: req.body.reason || defaultReason
       });
 
       return res.json({
@@ -115,25 +127,19 @@ const updateUserStatus = async (req, res) => {
         role: user.role,
         isActive: user.isActive,
         deactivationPending: true,
-        message: 'Deactivation request submitted for Master Admin approval.'
+        pendingRequestType: requestType,
+        message: `${targetIsActive ? 'Activation' : 'Deactivation'} request submitted for Master Admin approval.`
       });
     }
 
-    // Master Admin direct activation/deactivation OR Sub-Admin activating a deactivated account:
+    // Master Admin direct activation/deactivation:
     user.isActive = targetIsActive;
     await user.save();
 
-    if (targetIsActive === false) {
-      await DeactivationRequest.updateMany(
-        { targetUser: userId, status: 'PENDING' },
-        { status: 'APPROVED' }
-      );
-    } else {
-      await DeactivationRequest.updateMany(
-        { targetUser: userId, status: 'PENDING' },
-        { status: 'REJECTED' }
-      );
-    }
+    await DeactivationRequest.updateMany(
+      { targetUser: userId, status: 'PENDING' },
+      { status: 'APPROVED' }
+    );
 
     res.json({
       _id: user._id,
@@ -158,7 +164,10 @@ const getAllProviders = async (req, res) => {
     const providerUsers = await User.find({ role: 'provider' }).select('-password');
     const profiles = await ProviderProfile.find();
     const pendingRequests = await DeactivationRequest.find({ status: 'PENDING' });
-    const pendingUserIds = new Set(pendingRequests.map((r) => r.targetUser.toString()));
+    const pendingUserMap = new Map();
+    pendingRequests.forEach((r) => {
+      pendingUserMap.set(r.targetUser.toString(), r.requestType || 'DEACTIVATE');
+    });
 
     const result = providerUsers.map((u) => {
       const profile = profiles.find((p) => p.userId.toString() === u._id.toString());
@@ -183,7 +192,8 @@ const getAllProviders = async (req, res) => {
         averageRating: profile ? profile.averageRating : 0,
         totalReviews: profile ? profile.totalReviews : 0,
         isActive: u.isActive !== undefined ? u.isActive : true,
-        deactivationPending: pendingUserIds.has(u._id.toString())
+        deactivationPending: pendingUserMap.has(u._id.toString()),
+        pendingRequestType: pendingUserMap.get(u._id.toString()) || null
       };
     });
 
@@ -350,7 +360,11 @@ const respondDeactivationRequest = async (req, res) => {
     if (action === 'APPROVE') {
       const user = await User.findById(deactivationReq.targetUser);
       if (user) {
-        user.isActive = false;
+        if (deactivationReq.requestType === 'ACTIVATE') {
+          user.isActive = true;
+        } else {
+          user.isActive = false;
+        }
         await user.save();
       }
       deactivationReq.status = 'APPROVED';
@@ -360,8 +374,9 @@ const respondDeactivationRequest = async (req, res) => {
 
     await deactivationReq.save();
 
+    const actionTypeStr = deactivationReq.requestType === 'ACTIVATE' ? 'Activation' : 'Deactivation';
     res.json({
-      message: `Deactivation request ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully`,
+      message: `${actionTypeStr} request ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully`,
       request: deactivationReq
     });
   } catch (error) {

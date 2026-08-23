@@ -205,7 +205,7 @@ const AdminDashboard = () => {
           {[
             { id: 'users', label: `Users (${users.length})` },
             { id: 'providers', label: `Providers (${providers.length})` },
-            { id: 'requests', label: `Deactivation Requests (${pendingRequestsCount})` },
+            { id: 'requests', label: `Approval Requests (${pendingRequestsCount})` },
             { id: 'bookings', label: `Bookings (${bookings.length})` },
             { id: 'reviews', label: `Reviews (${reviews.length})` }
           ].map((t) => (
@@ -273,9 +273,9 @@ const AdminDashboard = () => {
                             >
                               {u.isActive ? 'Active' : 'Disabled'}
                             </span>
-                            {u.deactivationPending && u.isActive && (
+                            {u.deactivationPending && (
                               <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-2xs font-bold w-fit">
-                                Pending Approval
+                                {u.pendingRequestType === 'ACTIVATE' ? 'Pending Activation Approval' : 'Pending Deactivation Approval'}
                               </span>
                             )}
                           </div>
@@ -283,7 +283,7 @@ const AdminDashboard = () => {
                         <td className="p-4 text-right">
                           {u.role !== 'admin' && u.role !== 'subadmin' && u._id !== currentUser?._id && (
                             <div className="flex justify-end gap-2">
-                              {u.deactivationPending && u.isActive ? (
+                              {u.deactivationPending ? (
                                 isSubAdmin ? (
                                   <span className="px-3 py-1 text-2xs font-bold rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
                                     Request Pending
@@ -291,9 +291,11 @@ const AdminDashboard = () => {
                                 ) : (
                                   <button
                                     onClick={() => handleToggleUserActive(u)}
-                                    className="px-3 py-1 text-2xs font-bold rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors cursor-pointer"
+                                    className={`px-3 py-1 text-2xs font-bold rounded-lg text-white transition-colors cursor-pointer ${
+                                      u.isActive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                                    }`}
                                   >
-                                    Approve Deactivation
+                                    {u.isActive ? 'Approve Deactivation' : 'Approve Activation'}
                                   </button>
                                 )
                               ) : (
@@ -309,6 +311,8 @@ const AdminDashboard = () => {
                                     ? isSubAdmin
                                       ? 'Request Deactivation'
                                       : 'Deactivate'
+                                    : isSubAdmin
+                                    ? 'Request Activation'
                                     : 'Activate'}
                                 </button>
                               )}
@@ -370,9 +374,9 @@ const AdminDashboard = () => {
                               >
                                 {isUserActive ? 'Active' : 'Deactivated'}
                               </span>
-                              {isPending && isUserActive && (
+                              {isPending && (
                                 <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-2xs font-bold w-fit">
-                                  Pending Approval
+                                  {p.pendingRequestType === 'ACTIVATE' ? 'Pending Activation Approval' : 'Pending Deactivation Approval'}
                                 </span>
                               )}
                             </div>
@@ -402,19 +406,25 @@ const AdminDashboard = () => {
                               <button
                                 onClick={() => handleToggleUserActive({ _id: providerUserId, isActive: isUserActive })}
                                 className={`px-3 py-1 text-2xs font-bold rounded-lg transition-colors cursor-pointer ${
-                                  isUserActive
-                                    ? isPending
-                                      ? 'bg-amber-100 text-amber-800'
-                                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                                  isPending
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : isUserActive
+                                    ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
                                     : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                                 }`}
                               >
-                                {isUserActive
+                                {isPending
                                   ? isSubAdmin
-                                    ? isPending
-                                      ? 'Requested'
-                                      : 'Request Deactivation'
+                                    ? 'Request Pending'
+                                    : isUserActive
+                                    ? 'Approve Deactivation'
+                                    : 'Approve Activation'
+                                  : isUserActive
+                                  ? isSubAdmin
+                                    ? 'Request Deactivation'
                                     : 'Deactivate'
+                                  : isSubAdmin
+                                  ? 'Request Activation'
                                   : 'Activate'}
                               </button>
                             )}
@@ -429,12 +439,12 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Tab 3: Deactivation Requests */}
+        {/* Tab 3: Deactivation & Activation Requests */}
         {activeTab === 'requests' && (
           <div className="bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-2xs">
             {deactivationRequests.length === 0 ? (
               <div className="p-8 text-center text-slate-500 text-xs font-semibold">
-                No deactivation requests recorded.
+                No approval requests recorded.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -444,6 +454,7 @@ const AdminDashboard = () => {
                       <th className="p-4">Target User</th>
                       <th className="p-4">Role</th>
                       <th className="p-4">Requested By</th>
+                      <th className="p-4">Request Type</th>
                       <th className="p-4">Reason</th>
                       <th className="p-4">Date</th>
                       <th className="p-4">Status</th>
@@ -451,62 +462,77 @@ const AdminDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-600 font-medium">
-                    {deactivationRequests.map((req) => (
-                      <tr key={req._id} className="hover:bg-slate-50">
-                        <td className="p-4 font-bold text-slate-900">
-                          {req.targetUser?.name || 'User'}
-                          <div className="text-2xs text-slate-400 font-normal">{req.targetUser?.email}</div>
-                        </td>
-                        <td className="p-4 font-bold uppercase text-slate-500">{req.targetUser?.role || 'N/A'}</td>
-                        <td className="p-4">
-                          <span className="font-semibold text-indigo-600">{req.requestedBy?.name || 'Sub Admin'}</span>
-                          <div className="text-2xs text-slate-400">{req.requestedBy?.email}</div>
-                        </td>
-                        <td className="p-4 italic text-slate-600">{req.reason || 'N/A'}</td>
-                        <td className="p-4 text-slate-500">{new Date(req.createdAt).toLocaleDateString()}</td>
-                        <td className="p-4">
-                          <span
-                            className={`px-2.5 py-1 rounded-full text-2xs font-extrabold uppercase ${
-                              req.status === 'PENDING'
-                                ? 'bg-amber-100 text-amber-800'
-                                : req.status === 'APPROVED'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-rose-100 text-rose-800'
-                            }`}
-                          >
-                            {req.status}
-                          </span>
-                        </td>
-                        <td className="p-4 text-right">
-                          {req.status === 'PENDING' ? (
-                            isMasterAdmin ? (
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => handleDeactivationResponse(req._id, 'APPROVE')}
-                                  className="px-3 py-1 text-2xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() => handleDeactivationResponse(req._id, 'REJECT')}
-                                  className="px-3 py-1 text-2xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                  Reject
-                                </button>
-                              </div>
+                    {deactivationRequests.map((req) => {
+                      const isActivate = req.requestType === 'ACTIVATE';
+
+                      return (
+                        <tr key={req._id} className="hover:bg-slate-50">
+                          <td className="p-4 font-bold text-slate-900">
+                            {req.targetUser?.name || 'User'}
+                            <div className="text-2xs text-slate-400 font-normal">{req.targetUser?.email}</div>
+                          </td>
+                          <td className="p-4 font-bold uppercase text-slate-500">{req.targetUser?.role || 'N/A'}</td>
+                          <td className="p-4">
+                            <span className="font-semibold text-indigo-600">{req.requestedBy?.name || 'Sub Admin'}</span>
+                            <div className="text-2xs text-slate-400">{req.requestedBy?.email}</div>
+                          </td>
+                          <td className="p-4">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-2xs font-extrabold uppercase ${
+                                isActivate ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {isActivate ? 'Activation' : 'Deactivation'}
+                            </span>
+                          </td>
+                          <td className="p-4 italic text-slate-600">{req.reason || 'N/A'}</td>
+                          <td className="p-4 text-slate-500">{new Date(req.createdAt).toLocaleDateString()}</td>
+                          <td className="p-4">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-2xs font-extrabold uppercase ${
+                                req.status === 'PENDING'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : req.status === 'APPROVED'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {req.status}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right">
+                            {req.status === 'PENDING' ? (
+                              isMasterAdmin ? (
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => handleDeactivationResponse(req._id, 'APPROVE')}
+                                    className={`px-3 py-1 text-2xs font-bold text-white rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                                      isActivate ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
+                                    }`}
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    {isActivate ? 'Approve Activation' : 'Approve Deactivation'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeactivationResponse(req._id, 'REJECT')}
+                                    className="px-3 py-1 text-2xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-2xs text-amber-600 font-bold italic">
+                                  Awaiting Master Admin Approval
+                                </span>
+                              )
                             ) : (
-                              <span className="text-2xs text-amber-600 font-bold italic">
-                                Awaiting Master Admin Approval
-                              </span>
-                            )
-                          ) : (
-                            <span className="text-2xs text-slate-400 font-semibold">Resolved</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                              <span className="text-2xs text-slate-400 font-semibold">Resolved</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
